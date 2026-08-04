@@ -6,44 +6,31 @@ from zoneinfo import ZoneInfo
 BOT_TOKEN = os.environ["BOT_TOKEN"].strip()
 CHAT_ID = os.environ["CHAT_ID"].strip()
 
-# Lấy tỷ giá
-r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=20)
+url = "https://open.er-api.com/v6/latest/USD"
+r = requests.get(url, timeout=20)
 r.raise_for_status()
+data = r.json()["rates"]
 
-data = r.json()
+krw = data["KRW"]
+vnd = data["VND"]
+jpy = data["JPY"]
+eur = data["EUR"]
 
-print("API response:", data)
+msg = f"""💵 Exchange Rates
 
-krw = data["rates"]["KRW"]
-vnd = data["rates"]["VND"]
+USD/KRW : {krw:,.2f}
+USD/VND : {vnd:,.2f}
+KRW/VND : {vnd/krw:.4f}
+JPY/KRW : {krw/jpy:.4f}
+EUR/KRW : {krw/eur:.2f}
 
-time = datetime.now(
-    ZoneInfo("Asia/Seoul")
-).strftime("%Y-%m-%d %H:%M KST")
-
-message = f"""💵 USD Exchange Rate
-
-USD/KRW: {krw:,.2f}
-
-USD/VND: {vnd:,.2f}
-
-KRW/VND: {vnd/krw:.4f}
-
-{time}
+{datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M KST")}
 """
 
 resp = requests.post(
     f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-    data={
-        "chat_id": CHAT_ID,
-        "text": message,
-    },
+    data={"chat_id": CHAT_ID, "text": msg},
     timeout=20,
 )
-
-print("Telegram status:", resp.status_code)
-print("Telegram response:", resp.text)
-
+print(resp.status_code, resp.text)
 resp.raise_for_status()
-
-print("Done!")
