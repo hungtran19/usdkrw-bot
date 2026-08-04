@@ -1,47 +1,38 @@
-name: USD KRW Telegram
+name: Hourly Exchange Rate & Gold Checker
 
 on:
-  workflow_dispatch:
-
   schedule:
-    - cron: "0 * * * *"
-
-permissions:
-  contents: write
+    # Chạy vào phút thứ 0 của mỗi giờ (UTC)
+    - cron: '0 * * * *'
+  workflow_dispatch: # Nút bấm chạy thủ công trên GitHub
 
 jobs:
-
-  run:
-
+  check-and-notify:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.10'
 
-      - name: Install packages
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install requests
 
-      - name: Run Bot
+      - name: Run check script
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+
+      - name: Commit and push updated prices
         run: |
-          python main.py
-
-      - name: Save state
-        run: |
-          git config user.name github-actions
-          git config user.email actions@github.com
-
-          git add state.json || true
-
-          git diff --cached --quiet || git commit -m "Update state"
-
-          git push || true
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add last_prices.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Chore: Update last prices [skip ci]" && git push)
