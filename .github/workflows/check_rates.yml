@@ -2,10 +2,11 @@ name: Hourly Exchange Rate & Gold Checker
 
 on:
   schedule:
+    # Chạy tự động vào phút 0 của mỗi giờ (UTC)
     - cron: '0 * * * *'
-  workflow_dispatch:
+  workflow_dispatch: # Cho phép bấm nút "Run workflow" để test thủ công trên GitHub
 
-# CẤP QUYỀN GHI DỮ LIỆU BỔ SUNG Ở ĐÂY
+# Cấp quyền cho bot tự động commit & push thay đổi dữ liệu
 permissions:
   contents: write
 
@@ -25,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests
+          pip install requests beautifulsoup4
 
       - name: Run check script
         env:
