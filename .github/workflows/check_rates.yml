@@ -2,11 +2,11 @@ name: Hourly Exchange Rate & Gold Checker
 
 on:
   schedule:
-    # Chạy tự động vào phút 0 của mỗi giờ (UTC)
+    # Tự động chạy đúng 60 phút / 1 lần (vào phút thứ 0 hàng giờ)
     - cron: '0 * * * *'
   workflow_dispatch: # Cho phép bấm nút "Run workflow" để test thủ công trên GitHub
 
-# Cấp quyền cho bot tự động commit & push thay đổi dữ liệu
+# Cấp quyền cho bot tự động commit & push dữ liệu giá mới vào last_prices.json
 permissions:
   contents: write
 
