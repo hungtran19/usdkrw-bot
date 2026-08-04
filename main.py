@@ -25,20 +25,21 @@ def get_forex_rates():
         rates = res.get("rates", {})
         return rates.get("KRW"), rates.get("VND")
     except Exception as e:
-        print(f"Lỗi khi lấy tỷ giá ngoại tệ: {e}")
+        print(f"❌ Lỗi lấy tỷ giá ngoại tệ: {e}")
         return None, None
 
 def get_sjc_gold_price():
-    """Lấy giá vàng SJC bán ra (Đã xử lý sạch các ký tự đặc biệt của XML)"""
+    """Lấy giá vàng SJC bán ra (VND/lượng) với các nguồn dự phòng"""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    # --- CÁCH 1: Lấy từ XML chính thức của SJC ---
     try:
         url = "https://sjc.com.vn/xml/tygiagold.xml"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         res = requests.get(url, headers=headers, timeout=10)
-        
-        # Xử lý các entity chưa định nghĩa trong XML SJC để tránh lỗi parser
         xml_text = res.content.decode('utf-8', errors='ignore')
         xml_clean = re.sub(r'&(?!(amp|lt|gt|quot|apos);)', '&amp;', xml_text)
-        
         root = ET.fromstring(xml_clean)
         
         for item in root.findall(".//item"):
@@ -47,10 +48,38 @@ def get_sjc_gold_price():
             if "SJC" in type_name:
                 sell_str = buy_sell.get("sell", "").replace(",", "").strip()
                 if sell_str:
-                    sell_price = float(sell_str) * 1000  # Đổi ra VND/lượng
-                    return sell_price
+                    val = float(sell_str)
+                    # Nếu SJC trả về đơn vị nghìn đồng (vd: 89500) -> nhân 1000
+                    return val * 1000 if val < 100000 else val
     except Exception as e:
-        print(f"Lỗi khi lấy giá vàng SJC: {e}")
+        print(f"⚠️ Cách 1 (SJC XML) không lấy được: {e}")
+
+    # --- CÁCH 2: Lấy từ API tỷ giá/giá vàng dự phòng ---
+    try:
+        url = "https://api.vnappmob.com/api/v2/gold/sjc"
+        res = requests.get(url, headers=headers, timeout=10).json()
+        results = res.get("sjc", [])
+        if results:
+            # Lấy giá bán của mục đầu tiên
+            sell_price = float(results[0].get("sell", 0))
+            if sell_price > 0:
+                return sell_price
+    except Exception as e:
+        print(f"⚠️ Cách 2 (API Dự phòng) không lấy được: {e}")
+
+    # --- CÁCH 3: Web Scraping trực tiếp từ trang giá vàng ---
+    try:
+        url = "https://webgia.com/gia-vang/sjc/"
+        res = requests.get(url, headers=headers, timeout=10)
+        # Bắt giá trị bán ra từ HTML
+        matches = re.findall(r'(\d{2,3}[,\.]\d{3}[,\.]\d{3})', res.text)
+        if matches:
+            clean_val = matches[0].replace(",", "").replace(".", "")
+            return float(clean_val)
+    except Exception as e:
+        print(f"⚠️ Cách 3 (Web Scraping) không lấy được: {e}")
+
+    print("❌ Tất cả các nguồn giá vàng SJC đều thất bại.")
     return None
 
 def load_last_prices():
@@ -68,7 +97,7 @@ def save_current_prices(prices):
 
 def send_telegram_msg(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ CẢNH BÁO: Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID trong Secrets!")
+        print("❌ CẢNH BÁO: Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID!")
         return
     
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -78,13 +107,14 @@ def send_telegram_msg(message):
         "parse_mode": "HTML"
     }
     
-    response = requests.post(url, json=payload, timeout=10)
-    res_data = response.json()
-    
-    if res_data.get("ok"):
-        print("✅ Đã gửi tin nhắn Telegram thành công!")
-    else:
-        print(f"❌ Lỗi gửi Telegram: {res_data.get('description')}")
+    try:
+        res = requests.post(url, json=payload, timeout=10).json()
+        if res.get("ok"):
+            print("✅ Đã gửi tin nhắn Telegram thành công!")
+        else:
+            print(f"❌ Lỗi từ Telegram: {res.get('description')}")
+    except Exception as e:
+        print(f"❌ Lỗi kết nối Telegram: {e}")
 
 def format_change(curr, prev):
     diff = curr - prev
@@ -112,10 +142,11 @@ def main():
     last_prices = load_last_prices()
     alert_messages = []
 
-    print("--- DỮ LIỆU HIỆN TẠI ---")
-    print(f"USD/KRW : {krw}")
-    print(f"USD/VND : {vnd}")
-    print(f"Vàng SJC: {gold:,.0f} VND" if gold else "Vàng SJC: N/A")
+    print("\n--- GIÁ CẬP NHẬT MỚI NHẤT ---")
+    print(f"• USD/KRW : {krw}")
+    print(f"• USD/VND : {vnd}")
+    print(f"• Giá Vàng: {gold:,.0f} VND/lượng" if gold else "• Giá Vàng: N/A")
+    print("-----------------------------\n")
 
     for key, curr_val in current_prices.items():
         if curr_val is None:
