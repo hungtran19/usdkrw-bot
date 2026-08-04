@@ -3,8 +3,8 @@ import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHAT_ID = os.environ["CHAT_ID"]
+BOT_TOKEN = os.environ["BOT_TOKEN"].strip()
+CHAT_ID = os.environ["CHAT_ID"].strip()
 
 # Lấy tỷ giá
 r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=20)
