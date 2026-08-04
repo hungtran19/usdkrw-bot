@@ -2,9 +2,8 @@ name: Hourly Exchange Rate & Gold Checker
 
 on:
   schedule:
-    # Chạy vào phút thứ 0 của mỗi giờ (UTC)
     - cron: '0 * * * *'
-  workflow_dispatch: # Nút bấm chạy thủ công trên GitHub
+  workflow_dispatch:
 
 jobs:
   check-and-notify:
