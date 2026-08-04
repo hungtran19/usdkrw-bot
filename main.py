@@ -29,57 +29,51 @@ def get_forex_rates():
         return None, None
 
 def get_sjc_gold_price():
-    """Lấy giá vàng SJC bán ra (VND/lượng) với các nguồn dự phòng"""
+    """Lấy giá vàng SJC bán ra (VND/lượng) từ các nguồn API ổn định hơn"""
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
-    
-    # --- CÁCH 1: Lấy từ XML chính thức của SJC ---
-    try:
-        url = "https://sjc.com.vn/xml/tygiagold.xml"
-        res = requests.get(url, headers=headers, timeout=10)
-        xml_text = res.content.decode('utf-8', errors='ignore')
-        xml_clean = re.sub(r'&(?!(amp|lt|gt|quot|apos);)', '&amp;', xml_text)
-        root = ET.fromstring(xml_clean)
-        
-        for item in root.findall(".//item"):
-            buy_sell = item.attrib
-            type_name = buy_sell.get("type", "")
-            if "SJC" in type_name:
-                sell_str = buy_sell.get("sell", "").replace(",", "").strip()
-                if sell_str:
-                    val = float(sell_str)
-                    # Nếu SJC trả về đơn vị nghìn đồng (vd: 89500) -> nhân 1000
-                    return val * 1000 if val < 100000 else val
-    except Exception as e:
-        print(f"⚠️ Cách 1 (SJC XML) không lấy được: {e}")
 
-    # --- CÁCH 2: Lấy từ API tỷ giá/giá vàng dự phòng ---
+    # --- NGUỒN 1: API Giá vàng Báo Mới / Giavang.org ---
     try:
-        url = "https://api.vnappmob.com/api/v2/gold/sjc"
+        url = "https://giavang.org/api/v1/gold-prices/sjc"
         res = requests.get(url, headers=headers, timeout=10).json()
-        results = res.get("sjc", [])
-        if results:
-            # Lấy giá bán của mục đầu tiên
-            sell_price = float(results[0].get("sell", 0))
+        if isinstance(res, list) and len(res) > 0:
+            sell_price = float(res[0].get("sell", 0))
             if sell_price > 0:
-                return sell_price
+                return sell_price * 1000 if sell_price < 100000 else sell_price
     except Exception as e:
-        print(f"⚠️ Cách 2 (API Dự phòng) không lấy được: {e}")
+        print(f"⚠️ Nguồn 1 (Giavang.org) chưa lấy được: {e}")
 
-    # --- CÁCH 3: Web Scraping trực tiếp từ trang giá vàng ---
+    # --- NGUỒN 2: API TyGiaVang / GiaVangNhanh ---
     try:
-        url = "https://webgia.com/gia-vang/sjc/"
+        url = "https://tygia.com/json.php?ran=1&rate=g"
+        res = requests.get(url, headers=headers, timeout=10).text
+        # Làm sạch chuỗi JSON trả về từ tygia.com
+        res_json = json.loads(res.replace("(", "").replace(")", "").replace(";", ""))
+        items = res_json.get("items", [])
+        for item in items:
+            if "SJC" in item.get("type", "").upper():
+                sell_str = str(item.get("sell", "")).replace(",", "").replace(".", "")
+                if sell_str.isdigit():
+                    val = float(sell_str)
+                    return val * 1000 if val < 1000000 else val
+    except Exception as e:
+        print(f"⚠️ Nguồn 2 (TyGia) chưa lấy được: {e}")
+
+    # --- NGUỒN 3: Web Scraping từ TyGiaUSD / BTMC / MinhChau ---
+    try:
+        url = "https://tygiausd.com/gia-vang-sjc"
         res = requests.get(url, headers=headers, timeout=10)
-        # Bắt giá trị bán ra từ HTML
+        # Tìm chuỗi số biểu diễn giá bán SJC (ví dụ 89,500,000 hoặc 89.500)
         matches = re.findall(r'(\d{2,3}[,\.]\d{3}[,\.]\d{3})', res.text)
         if matches:
             clean_val = matches[0].replace(",", "").replace(".", "")
             return float(clean_val)
     except Exception as e:
-        print(f"⚠️ Cách 3 (Web Scraping) không lấy được: {e}")
+        print(f"⚠️ Nguồn 3 (TygiaUSD) chưa lấy được: {e}")
 
-    print("❌ Tất cả các nguồn giá vàng SJC đều thất bại.")
+    print("❌ Tất cả nguồn giá vàng SJC đều thất bại.")
     return None
 
 def load_last_prices():
