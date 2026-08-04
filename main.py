@@ -1,6 +1,8 @@
 import os
 import json
+import re
 import requests
+from bs4 import BeautifulSoup
 
 # --- CẤU HÌNH THÔNG SỐ TELEGRAM ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -10,13 +12,13 @@ DATA_FILE = "last_prices.json"
 
 # --- NGƯỠNG CẢNH BÁO ---
 THRESHOLDS = {
-    "USD/KRW": 0.0,         # Tăng/giảm >= 5 KRW
-    "USD/VND": 000.0,       # Tăng/giảm >= 500 VND
-    "GOLD_SJC": 000000.0    # Tăng/giảm >= 300,000 VND/lượng
+    "USD/KRW": 5.0,         # Tăng/giảm >= 5 KRW
+    "USD/VND": 500.0,       # Tăng/giảm >= 500 VND
+    "GOLD_SJC": 300000.0    # Tăng/giảm >= 300,000 VND/lượng
 }
 
 def get_forex_rates():
-    """Lấy tỷ giá ngoại tệ USD/KRW và USD/VND"""
+    """Lấy tỷ giá USD/KRW và USD/VND từ Open ER API (Hoạt động 100%)"""
     try:
         url = "https://open.er-api.com/v6/latest/USD"
         res = requests.get(url, timeout=10).json()
@@ -28,35 +30,57 @@ def get_forex_rates():
 
 def get_sjc_gold_price():
     """
-    Lấy giá vàng SJC Việt Nam (VND/lượng) 
-    Sử dụng API tổng hợp dữ liệu giá vàng trong nước không bị chặn IP
+    Scrape giá vàng SJC bán ra (VND/lượng) trực tiếp từ HTML trang tin tức tài chính.
+    Giúp vượt rào cản chặn IP/Bot của GitHub Actions.
     """
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    
-    # Nguồn 1: API Tỷ giá & Vàng tổng hợp công khai
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+    }
+
+    # Nguồn 1: Scrape từ trang Giá Vàng Báo Mới / Tin Tức
     try:
-        url = "https://vapi.vnappmob.com/api/v2/gold/sjc"
+        url = "https://baomoi.com/tien-ich-gia-vang-sjc.epi"
         res = requests.get(url, headers=headers, timeout=10)
         if res.status_code == 200:
-            data = res.json()
-            results = data.get("results", [])
-            if results:
-                # Lấy giá bán ra SJC
-                sell_val = float(results[0].get("sell", 0))
-                if sell_val > 0:
-                    return sell_val * 1000 if sell_val < 100000 else sell_val
+            soup = BeautifulSoup(res.text, 'html.parser')
+            # Tìm thẻ chứa thông tin giá SJC
+            rows = soup.find_all('tr')
+            for row in rows:
+                text = row.get_text()
+                if "SJC" in text and ("1L" in text or "10L" in text or "Miếng" in text):
+                    cols = row.find_all('td')
+                    if len(cols) >= 3:
+                        # Lấy cột bán ra
+                        sell_str = cols[-1].get_text().strip().replace(',', '').replace('.', '')
+                        digits = re.findall(r'\d+', sell_str)
+                        if digits:
+                            val = float(digits[0])
+                            # Chuẩn hóa về đơn vị VND/Lượng (vd: 89500000)
+                            if val < 100000:
+                                return val * 1000
+                            return val
     except Exception as e:
-        print(f"⚠️ Nguồn 1 lỗi: {e}")
+        print(f"⚠️ Nguồn Báo Mới thất bại: {e}")
 
-    # Nguồn 2 Dự phòng: API Giá vàng TyGia
+    # Nguồn 2 Dự phòng: Scrape từ Giá Vàng ORG
     try:
-        url = "https://api.statful.com/v1/gold/sjc"
-        res = requests.get(url, headers=headers, timeout=10).json()
-        if "price" in res:
-            return float(res["price"])
+        url = "https://giavang.org/"
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            # Lấy giá bán SJC từ bảng tổng hợp
+            text = soup.get_text()
+            matches = re.findall(r'SJC[^\d]+(\d{2,3}[\.,]\d{3})', text)
+            if matches:
+                clean_num = matches[0].replace('.', '').replace(',', '')
+                val = float(clean_num)
+                return val * 1000 if val < 1000000 else val
     except Exception as e:
-        print(f"⚠️ Nguồn 2 lỗi: {e}")
+        print(f"⚠️ Nguồn GiaVangORG thất bại: {e}")
 
+    print("❌ Không thể cào giá vàng SJC từ các nguồn HTML.")
     return None
 
 def load_last_prices():
@@ -74,7 +98,7 @@ def save_current_prices(prices):
 
 def send_telegram_msg(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ CẢNH BÁO: Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID trong Secrets!")
+        print("❌ CẢNH BÁO: Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID!")
         return
     
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -89,17 +113,16 @@ def send_telegram_msg(message):
         if res.get("ok"):
             print("✅ Đã gửi tin nhắn Telegram thành công!")
         else:
-            print(f"❌ Lỗi Telegram: {res.get('description')}")
+            print(f"❌ Lỗi từ Telegram: {res.get('description')}")
     except Exception as e:
-        print(f"❌ Lỗi gửi tin nhắn Telegram: {e}")
+        print(f"❌ Lỗi kết nối Telegram: {e}")
 
 def format_change(curr, prev, is_gold=False):
     """
-    Sửa lỗi so sánh số thực: Làm tròn chênh lệch trước khi đánh giá TĂNG/GIẢM/KHÔNG ĐỔI
+    Sửa triệt để lỗi logic mũi tên khi giá không đổi:
+    Sử dụng round() chính xác để tránh sai số dấu phẩy động của Python.
     """
     diff = curr - prev
-    
-    # Làm tròn để tránh lỗi số thực (floating point error)
     precision = 0 if is_gold else 2
     rounded_diff = round(diff, precision)
 
@@ -136,10 +159,10 @@ def main():
     alert_messages = []
 
     print("\n---------------------------------")
-    print("DỮ LIỆU CẬP NHẬT:")
+    print("DỮ LIỆU LẤY VỀ:")
     print(f"• USD/KRW : {krw}")
     print(f"• USD/VND : {vnd}")
-    print(f"• Giá Vàng SJC: {gold:,.0f} VND/lượng" if gold else "• Giá Vàng SJC: Chưa lấy được")
+    print(f"• Giá Vàng SJC: {gold:,.0f} VND/lượng" if gold else "• Giá Vàng SJC: N/A (Thất bại)")
     print("---------------------------------\n")
 
     for key, curr_val in current_prices.items():
@@ -152,7 +175,6 @@ def main():
             diff = abs(curr_val - prev_val)
             threshold = THRESHOLDS.get(key, 0)
 
-            # Chỉ đưa vào danh sách cảnh báo nếu chênh lệch >= ngưỡng
             if diff >= threshold:
                 is_gold = "GOLD" in key
                 arrow, diff_str, pct_str = format_change(curr_val, prev_val, is_gold=is_gold)
@@ -178,7 +200,7 @@ def main():
         full_msg = "🚨 <b>THÔNG BÁO TỶ GIÁ & GIÁ VÀNG HÀNG GIỜ</b> 🚨\n\n" + "\n\n".join(alert_messages)
         send_telegram_msg(full_msg)
     else:
-        print("Không có mục nào biến động vượt ngưỡng cài đặt.")
+        print("Biến động chưa vượt ngưỡng cài đặt.")
 
     save_current_prices(current_prices)
 
