@@ -5,6 +5,10 @@ on:
     - cron: '0 * * * *'
   workflow_dispatch:
 
+# CẤP QUYỀN GHI DỮ LIỆU BỔ SUNG Ở ĐÂY
+permissions:
+  contents: write
+
 jobs:
   check-and-notify:
     runs-on: ubuntu-latest
