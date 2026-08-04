@@ -1,4 +1,4 @@
-aname: USD KRW Telegram
+name: USD KRW Telegram
 
 on:
   workflow_dispatch:
