@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import requests
 import xml.etree.ElementTree as ET
 
@@ -18,24 +19,36 @@ THRESHOLDS = {
 
 def get_forex_rates():
     """Lấy tỷ giá USD/KRW và USD/VND"""
-    url = "https://api.exchangerate-api.com/v4/latest/USD"
-    res = requests.get(url, timeout=10).json()
-    rates = res.get("rates", {})
-    return rates.get("KRW"), rates.get("VND")
+    try:
+        url = "https://api.exchangerate-api.com/v4/latest/USD"
+        res = requests.get(url, timeout=10).json()
+        rates = res.get("rates", {})
+        return rates.get("KRW"), rates.get("VND")
+    except Exception as e:
+        print(f"Lỗi khi lấy tỷ giá ngoại tệ: {e}")
+        return None, None
 
 def get_sjc_gold_price():
-    """Lấy giá vàng SJC bán ra"""
+    """Lấy giá vàng SJC bán ra (Đã xử lý sạch các ký tự đặc biệt của XML)"""
     try:
         url = "https://sjc.com.vn/xml/tygiagold.xml"
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         res = requests.get(url, headers=headers, timeout=10)
-        root = ET.fromstring(res.content)
+        
+        # Xử lý các entity chưa định nghĩa trong XML SJC để tránh lỗi parser
+        xml_text = res.content.decode('utf-8', errors='ignore')
+        xml_clean = re.sub(r'&(?!(amp|lt|gt|quot|apos);)', '&amp;', xml_text)
+        
+        root = ET.fromstring(xml_clean)
         
         for item in root.findall(".//item"):
             buy_sell = item.attrib
-            if "SJC" in buy_sell.get("type", ""):
-                sell_price = float(buy_sell.get("sell").replace(",", "")) * 1000
-                return sell_price
+            type_name = buy_sell.get("type", "")
+            if "SJC" in type_name:
+                sell_str = buy_sell.get("sell", "").replace(",", "").strip()
+                if sell_str:
+                    sell_price = float(sell_str) * 1000  # Đổi ra VND/lượng
+                    return sell_price
     except Exception as e:
         print(f"Lỗi khi lấy giá vàng SJC: {e}")
     return None
@@ -55,15 +68,23 @@ def save_current_prices(prices):
 
 def send_telegram_msg(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Thiếu Telegram Token hoặc Chat ID!")
+        print("❌ CẢNH BÁO: Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID trong Secrets!")
         return
+    
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "HTML"
     }
-    requests.post(url, json=payload, timeout=10)
+    
+    response = requests.post(url, json=payload, timeout=10)
+    res_data = response.json()
+    
+    if res_data.get("ok"):
+        print("✅ Đã gửi tin nhắn Telegram thành công!")
+    else:
+        print(f"❌ Lỗi gửi Telegram: {res_data.get('description')}")
 
 def format_change(curr, prev):
     diff = curr - prev
@@ -90,6 +111,11 @@ def main():
 
     last_prices = load_last_prices()
     alert_messages = []
+
+    print("--- DỮ LIỆU HIỆN TẠI ---")
+    print(f"USD/KRW : {krw}")
+    print(f"USD/VND : {vnd}")
+    print(f"Vàng SJC: {gold:,.0f} VND" if gold else "Vàng SJC: N/A")
 
     for key, curr_val in current_prices.items():
         if curr_val is None:
@@ -124,6 +150,8 @@ def main():
     if alert_messages:
         full_msg = "🚨 <b>THÔNG BÁO TỶ GIÁ & GIÁ VÀNG HÀNG GIỜ</b> 🚨\n\n" + "\n\n".join(alert_messages)
         send_telegram_msg(full_msg)
+    else:
+        print("Biến động chưa vượt ngưỡng cài đặt.")
 
     save_current_prices(current_prices)
 
