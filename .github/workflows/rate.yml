@@ -1,18 +1,15 @@
-name: USD KRW Telegram
+aname: USD KRW Telegram
 
 on:
   workflow_dispatch:
-
   schedule:
     - cron: "0 * * * *"
 
 jobs:
   send:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
