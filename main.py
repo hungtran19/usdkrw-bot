@@ -13,16 +13,12 @@ data = r.json()["rates"]
 
 krw = data["KRW"]
 vnd = data["VND"]
-jpy = data["JPY"]
-eur = data["EUR"]
 
 msg = f"""💵 Exchange Rates
 
 USD/KRW : {krw:,.2f}
 USD/VND : {vnd:,.2f}
 KRW/VND : {vnd/krw:.4f}
-JPY/KRW : {krw/jpy:.4f}
-EUR/KRW : {krw/eur:.2f}
 
 {datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M KST")}
 """
