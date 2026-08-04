@@ -12,9 +12,9 @@ DATA_FILE = "last_prices.json"
 
 # --- NGƯỠNG CẢNH BÁO ---
 THRESHOLDS = {
-    "USD/KRW": 0.0,         # Tăng/giảm >= 5 KRW
-    "USD/VND": 000.0,       # Tăng/giảm >= 500 VND
-    "GOLD_SJC": 000000.0    # Tăng/giảm >= 300,000 VND/lượng
+    "USD/KRW": 5.0,         # Tăng/giảm >= 5 KRW
+    "USD/VND": 500.0,       # Tăng/giảm >= 500 VND
+    "GOLD_SJC": 300000.0    # Tăng/giảm >= 300,000 VND/lượng
 }
 
 def get_forex_rates():
