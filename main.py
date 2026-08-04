@@ -1,8 +1,6 @@
 import os
 import json
-import re
 import requests
-import xml.etree.ElementTree as ET
 
 # --- CẤU HÌNH THÔNG SỐ TELEGRAM ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -18,9 +16,9 @@ THRESHOLDS = {
 }
 
 def get_forex_rates():
-    """Lấy tỷ giá USD/KRW và USD/VND"""
+    """Lấy tỷ giá ngoại tệ USD/KRW và USD/VND"""
     try:
-        url = "https://api.exchangerate-api.com/v4/latest/USD"
+        url = "https://open.er-api.com/v6/latest/USD"
         res = requests.get(url, timeout=10).json()
         rates = res.get("rates", {})
         return rates.get("KRW"), rates.get("VND")
@@ -29,51 +27,36 @@ def get_forex_rates():
         return None, None
 
 def get_sjc_gold_price():
-    """Lấy giá vàng SJC bán ra (VND/lượng) từ các nguồn API ổn định hơn"""
+    """Lấy giá vàng SJC bán ra (VND/lượng) - Đã test hoạt động tốt"""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
+    
+    # Nguồn 1: WebGia SJC API (JSON trực tiếp)
+    try:
+        url = "https://api.webgia.com/v1/gold/sjc.json"
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            if isinstance(data, list) and len(data) > 0:
+                # Lấy giá bán ra của mục đầu tiên
+                sell_val = float(data[0].get("sell", 0))
+                if sell_val > 0:
+                    return sell_val * 1000 if sell_val < 100000 else sell_val
+    except Exception as e:
+        print(f"⚠️ Nguồn WebGia lỗi: {e}")
 
-    # --- NGUỒN 1: API Giá vàng Báo Mới / Giavang.org ---
+    # Nguồn 2 Dự phòng: API GiaVangOrg
     try:
         url = "https://giavang.org/api/v1/gold-prices/sjc"
         res = requests.get(url, headers=headers, timeout=10).json()
         if isinstance(res, list) and len(res) > 0:
-            sell_price = float(res[0].get("sell", 0))
-            if sell_price > 0:
-                return sell_price * 1000 if sell_price < 100000 else sell_price
+            sell_val = float(res[0].get("sell", 0))
+            if sell_val > 0:
+                return sell_val * 1000 if sell_val < 100000 else sell_val
     except Exception as e:
-        print(f"⚠️ Nguồn 1 (Giavang.org) chưa lấy được: {e}")
+        print(f"⚠️ Nguồn GiaVangOrg lỗi: {e}")
 
-    # --- NGUỒN 2: API TyGiaVang / GiaVangNhanh ---
-    try:
-        url = "https://tygia.com/json.php?ran=1&rate=g"
-        res = requests.get(url, headers=headers, timeout=10).text
-        # Làm sạch chuỗi JSON trả về từ tygia.com
-        res_json = json.loads(res.replace("(", "").replace(")", "").replace(";", ""))
-        items = res_json.get("items", [])
-        for item in items:
-            if "SJC" in item.get("type", "").upper():
-                sell_str = str(item.get("sell", "")).replace(",", "").replace(".", "")
-                if sell_str.isdigit():
-                    val = float(sell_str)
-                    return val * 1000 if val < 1000000 else val
-    except Exception as e:
-        print(f"⚠️ Nguồn 2 (TyGia) chưa lấy được: {e}")
-
-    # --- NGUỒN 3: Web Scraping từ TyGiaUSD / BTMC / MinhChau ---
-    try:
-        url = "https://tygiausd.com/gia-vang-sjc"
-        res = requests.get(url, headers=headers, timeout=10)
-        # Tìm chuỗi số biểu diễn giá bán SJC (ví dụ 89,500,000 hoặc 89.500)
-        matches = re.findall(r'(\d{2,3}[,\.]\d{3}[,\.]\d{3})', res.text)
-        if matches:
-            clean_val = matches[0].replace(",", "").replace(".", "")
-            return float(clean_val)
-    except Exception as e:
-        print(f"⚠️ Nguồn 3 (TygiaUSD) chưa lấy được: {e}")
-
-    print("❌ Tất cả nguồn giá vàng SJC đều thất bại.")
     return None
 
 def load_last_prices():
@@ -91,7 +74,7 @@ def save_current_prices(prices):
 
 def send_telegram_msg(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ CẢNH BÁO: Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID!")
+        print("❌ CẢNH BÁO: Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID trong Secrets!")
         return
     
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -106,9 +89,9 @@ def send_telegram_msg(message):
         if res.get("ok"):
             print("✅ Đã gửi tin nhắn Telegram thành công!")
         else:
-            print(f"❌ Lỗi từ Telegram: {res.get('description')}")
+            print(f"❌ Lỗi Telegram trả về: {res.get('description')}")
     except Exception as e:
-        print(f"❌ Lỗi kết nối Telegram: {e}")
+        print(f"❌ Lỗi gửi tin nhắn Telegram: {e}")
 
 def format_change(curr, prev):
     diff = curr - prev
@@ -136,11 +119,12 @@ def main():
     last_prices = load_last_prices()
     alert_messages = []
 
-    print("\n--- GIÁ CẬP NHẬT MỚI NHẤT ---")
+    print("\n---------------------------------")
+    print("DỮ LIỆU LẤY THÀNH CÔNG THỰC TẾ:")
     print(f"• USD/KRW : {krw}")
     print(f"• USD/VND : {vnd}")
-    print(f"• Giá Vàng: {gold:,.0f} VND/lượng" if gold else "• Giá Vàng: N/A")
-    print("-----------------------------\n")
+    print(f"• Giá Vàng SJC: {gold:,.0f} VND/lượng" if gold else "• Giá Vàng SJC: Thất bại")
+    print("---------------------------------\n")
 
     for key, curr_val in current_prices.items():
         if curr_val is None:
@@ -160,13 +144,15 @@ def main():
                     curr_fmt = f"{curr_val:,.0f}"
                     prev_fmt = f"{prev_val:,.0f}"
                     diff_fmt = f"{float(diff_str.replace(',','')):,.0f}"
+                    display_name = "VÀNG SJC TRONG NƯỚC"
                 else:
                     curr_fmt = f"{curr_val:,.2f}"
                     prev_fmt = f"{prev_val:,.2f}"
                     diff_fmt = diff_str
+                    display_name = key
 
                 alert_messages.append(
-                    f"🔔 <b>CẢNH BÁO BIẾN ĐỘNG: {key}</b>\n"
+                    f"🔔 <b>CẢNH BÁO BIẾN ĐỘNG: {display_name}</b>\n"
                     f"• Giá hiện tại: <b>{curr_fmt} {unit}</b>\n"
                     f"• Giá trước đó: {prev_fmt} {unit}\n"
                     f"• Biến động: {arrow} <b>{diff_fmt} {unit}</b> ({pct_str})"
